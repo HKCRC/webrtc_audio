@@ -1,7 +1,4 @@
 export const config = {
-    host: '192.168.168.106',
+    host: '106.53.132.6',
     port: 8000,
-    api: {
-        base: 'http://192.168.168.106:8000',
-    }
 }
