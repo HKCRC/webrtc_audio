@@ -14,6 +14,23 @@ class MediasoupClient {
     this.onUserJoined = null;
     this.onUserLeft = null;
     this.onNewAudio = null;
+    this.audioContext = null;
+  }
+
+  // 初始化 AudioContext（Chrome 需要用户交互）
+  initAudioContext() {
+    if (!this.audioContext) {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      console.log('🔊 AudioContext 已初始化，状态:', this.audioContext.state);
+      
+      // 如果 AudioContext 被暂停，尝试恢复
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().then(() => {
+          console.log('🔊 AudioContext 已恢复');
+        });
+      }
+    }
+    return this.audioContext;
   }
 
   // 连接到服务器
@@ -213,27 +230,32 @@ class MediasoupClient {
         throw new Error('发送传输未创建');
       }
 
+      // 初始化 AudioContext（Chrome 需要）
+      this.initAudioContext();
+
       // 获取用户音频流
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 48000
+          sampleRate: 48000,
+          autoGainControl: true
         },
         video: false
       });
 
       const audioTrack = stream.getAudioTracks()[0];
+      console.log('✅ 获取音频轨道成功:', audioTrack.getSettings());
       
       // 创建生产者
       this.producer = await this.sendTransport.produce({
         track: audioTrack
       });
 
-      console.log('开始发送音频');
+      console.log('✅ 开始发送音频，Producer ID:', this.producer.id);
       return this.producer;
     } catch (error) {
-      console.error('发送音频失败:', error);
+      console.error('❌ 发送音频失败:', error);
       throw error;
     }
   }
@@ -278,7 +300,30 @@ class MediasoupClient {
       audioElement.srcObject = new MediaStream([consumer.track]);
       audioElement.autoplay = true;
       audioElement.playsInline = true;
+      audioElement.volume = 1.0;
       document.body.appendChild(audioElement);
+
+      // Chrome 需要显式调用 play() 并处理自动播放策略
+      const playPromise = audioElement.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          console.log('✅ 音频播放成功:', consumer.id);
+        }).catch(error => {
+          console.error('❌ 音频自动播放被阻止:', error);
+          // 如果自动播放失败，尝试静音播放
+          audioElement.muted = true;
+          audioElement.play().then(() => {
+            console.log('⚠️ 以静音模式播放，请用户点击页面取消静音');
+            // 监听用户交互，取消静音
+            const unmute = () => {
+              audioElement.muted = false;
+              console.log('🔊 已取消静音');
+              document.removeEventListener('click', unmute);
+            };
+            document.addEventListener('click', unmute, { once: true });
+          });
+        });
+      }
 
       if (this.onNewAudio) {
         this.onNewAudio(audioElement, consumer);
