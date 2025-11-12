@@ -1,4 +1,4 @@
 export const config = {
-    host: '106.53.132.6',
-    port: 8000,
+    host: '129.226.138.87',
+    port: 18000,
 }
