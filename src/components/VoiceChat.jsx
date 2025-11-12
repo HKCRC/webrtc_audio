@@ -99,11 +99,6 @@ const VoiceChat = () => {
       setError('');
       setStatus('正在连接到服务器...');
       
-      // 初始化 AudioContext（Chrome 需要用户交互）
-      if (clientRef.current.initAudioContext) {
-        clientRef.current.initAudioContext();
-      }
-      
       await clientRef.current.connect();
       await clientRef.current.initializeDevice();
       
@@ -175,18 +170,12 @@ const VoiceChat = () => {
       setError('');
       setStatus('正在开启麦克风...');
       
-      // 确保 AudioContext 已初始化
-      if (clientRef.current.initAudioContext) {
-        clientRef.current.initAudioContext();
-      }
-      
       await clientRef.current.produceAudio();
       setIsProducing(true);
       setStatus('麦克风已开启，正在发送音频');
     } catch (err) {
       setError(`开启麦克风失败: ${err.message}`);
       setStatus('开启麦克风失败');
-      console.error('开启麦克风详细错误:', err);
     }
   };
 
