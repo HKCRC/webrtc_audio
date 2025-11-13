@@ -249,6 +249,48 @@ class MediasoupClient {
     }
   }
 
+  // 离开房间
+  async leaveRoom() {
+    try {
+      console.log('正在离开房间...');
+      
+      // 停止生产音频
+      this.stopProducing();
+      
+      // 关闭所有消费者
+      this.consumers.forEach(consumer => {
+        consumer.close();
+      });
+      this.consumers.clear();
+      
+      // 关闭传输
+      if (this.sendTransport) {
+        this.sendTransport.close();
+        this.sendTransport = null;
+      }
+      
+      if (this.recvTransport) {
+        this.recvTransport.close();
+        this.recvTransport = null;
+      }
+      
+      // 通知服务器离开房间（如果服务器支持）
+      if (this.socket && this.socket.connected && this.roomId) {
+        try {
+          await this.socketRequest('leaveRoom', { roomId: this.roomId });
+        } catch (error) {
+          console.warn('通知服务器离开房间失败，可能服务器不支持此事件:', error);
+        }
+      }
+      
+      this.roomId = null;
+      console.log('已离开房间');
+    } catch (error) {
+      console.error('离开房间时出错:', error);
+      throw error;
+    }
+  }
+
   // 消费音频
   async consumeAudio(producerId) {
     try {

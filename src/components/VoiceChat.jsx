@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import MediasoupClient from '../utils/MediasoupClient.js';
 import './VoiceChat.css';
 
@@ -15,43 +15,123 @@ const VoiceChat = () => {
   const clientRef = useRef(null);
   const audioElementsRef = useRef(new Map());
 
+  // 使用 ref 来存储最新的状态，避免闭包问题
+  const isConnectedRef = useRef(false);
+  const isInRoomRef = useRef(false);
+  const isProducingRef = useRef(false);
+
+  // 同步状态到 ref
   useEffect(() => {
-      console.log('useEffect');
-        // 在网页中添加消息监听器
-      window.addEventListener('message', async (event) => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
+
+  useEffect(() => {
+    isInRoomRef.current = isInRoom;
+  }, [isInRoom]);
+
+  useEffect(() => {
+    isProducingRef.current = isProducing;
+  }, [isProducing]);
+
+  // 处理开始录音
+  const handleStartAudio = useCallback(async () => {
+    try {
+      console.log('处理开始录音');
+      
+      // 1. 检查并连接服务器
+      if (!isConnectedRef.current) {
+        console.log('未连接，先连接服务器');
+        await connectToServer();
+      }
+      
+      // 2. 检查并加入房间
+      if (!isInRoomRef.current) {
+        console.log('未在房间，先加入房间');
+        roomIdRef.current = '10000';
+        setRoomId('10000');
+        await joinRoom();
+      }
+      
+      // 3. 开始录音
+      console.log('开始录音');
+      await startSpeaking();
+    } catch (error) {
+      console.error('处理开始录音失败:', error);
+      setError(`开始录音失败: ${error.message}`);
+    }
+  }, []);
+
+  // 处理只听模式（进入房间但不录音）
+  const handleEnterRoom = useCallback(async () => {
+    try {
+      console.log('处理进入只听模式');
+      
+      // 1. 检查并连接服务器
+      if (!isConnectedRef.current) {
+        console.log('未连接，先连接服务器');
+        await connectToServer();
+      }
+      
+      // 2. 检查并加入房间
+      if (!isInRoomRef.current) {
+        console.log('未在房间，先加入房间');
+        roomIdRef.current = '10000';
+        setRoomId('10000');
+        await joinRoom();
+      }
+      
+      // 3. 如果正在录音，停止录音（但保持在房间内）
+      if (isProducingRef.current) {
+        console.log('停止录音，进入只听模式');
+        stopSpeaking();
+      }
+    } catch (error) {
+      console.error('处理进入房间失败:', error);
+      setError(`进入房间失败: ${error.message}`);
+    }
+  }, []);
+
+  // 处理离开房间
+  const handleLeaveRoom = useCallback(async () => {
+    try {
+      console.log('处理离开房间');
+      await leaveRoom();
+      disconnectFromServer();
+    } catch (error) {
+      console.error('处理离开房间失败:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+      console.log('useEffect - 设置消息监听器');
+      
+      // 在网页中添加消息监听器
+      const handleMessage = async (event) => {
         if (event.data.type === 'webview') {
           console.log('Received audio control:', event.data.action);
+          
           // 处理具体的音频控制逻辑
           switch(event.data.action) {
             case 'START_AUDIO':
-              // 开始录音逻辑
-              startSpeaking();
+              await handleStartAudio();
               break;
             case 'LEAVE_ROOM':
-              console.log('LEAVE_ROOM');
-              leaveRoom();
-              disconnectFromServer();
-              // 停止录音逻辑
+              await handleLeaveRoom();
               break;
             case 'ENTER_ROOM':
-              // 进入房间逻辑
-              if (!isConnected) {
-                await connectToServer();
-              } 
-
-              if (!isInRoom) {
-                setTimeout(() => {
-                  roomIdRef.current = '10000';
-                  joinRoom();
-                }, 100);
-              }
-
-              stopSpeaking();
+              await handleEnterRoom();
               break;
           }
         }
-      });
-  }, []);
+      };
+      
+      window.addEventListener('message', handleMessage);
+      
+      // 清理函数
+      return () => {
+        window.removeEventListener('message', handleMessage);
+      };
+  }, [handleStartAudio, handleLeaveRoom, handleEnterRoom]);
 
 
 
@@ -59,6 +139,9 @@ const VoiceChat = () => {
   useEffect(() => {
     // 初始化MediasoupClient
     clientRef.current = new MediasoupClient();
+    
+    // 保存对 audioElementsRef 的引用，供清理函数使用
+    const audioElementsMap = audioElementsRef.current;
     
     // 设置事件回调
     clientRef.current.onUserJoined = (data) => {
@@ -89,8 +172,8 @@ const VoiceChat = () => {
       if (clientRef.current) {
         clientRef.current.disconnect();
       }
-      // 清理所有音频元素
-      audioElementsRef.current.forEach(audio => audio.remove());
+      // 清理所有音频元素，使用保存的引用
+      audioElementsMap.forEach(audio => audio.remove());
     };
   }, []);
 
@@ -134,20 +217,28 @@ const VoiceChat = () => {
     }
   };
 
-  const leaveRoom = () => {
-    // 不要完全断开服务器连接，只清理房间相关的状态
-    if (clientRef.current && clientRef.current.producer) {
-      clientRef.current.stopProducing();
+  const leaveRoom = async () => {
+    try {
+      // 通知服务器离开房间
+      if (clientRef.current && clientRef.current.roomId) {
+        await clientRef.current.leaveRoom();
+      }
+      
+      // 清理本地状态
+      setIsInRoom(false);
+      setIsProducing(false);
+      setPeers([]);
+      setRoomId('');
+      roomIdRef.current = '';
+      setStatus('已离开房间');
+      
+      // 清理音频元素
+      audioElementsRef.current.forEach(audio => audio.remove());
+      audioElementsRef.current.clear();
+    } catch (error) {
+      console.error('离开房间失败:', error);
+      setError(`离开房间失败: ${error.message}`);
     }
-    
-    setIsInRoom(false);
-    setIsProducing(false);
-    setPeers([]);
-    setStatus('已离开房间');
-    
-    // 清理音频元素
-    audioElementsRef.current.forEach(audio => audio.remove());
-    audioElementsRef.current.clear();
   };
 
   const disconnectFromServer = () => {
