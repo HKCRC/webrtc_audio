@@ -223,6 +223,8 @@ class MediasoupClient {
         video: false
       });
 
+      console.error(`stream.getAudioTracks()`, JSON.stringify(stream.getAudioTracks()));
+
       const audioTrack = stream.getAudioTracks()[0];
       
       // 创建生产者
